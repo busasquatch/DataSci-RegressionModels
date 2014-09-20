@@ -1,0 +1,151 @@
+---
+output:
+  html_document:
+    keep_md: yes
+---
+#### Predicting Miles Per Gallon using mtcars Data  
+```{r, warning=FALSE, echo=FALSE}
+library(datasets)
+library(car)
+library(ggplot2)
+library(plyr)
+df <- datasets::mtcars
+df <- plyr::rename(df, c("am" = "transmission"))
+df$transmission <- as.factor(df$transmission)
+levels(df$transmission) <- c("automatic", "manual")
+x <- table(df$transmission)
+```
+
+```{r, echo=FALSE}
+t <- t.test(mpg ~ transmission, data = df, var.equal = FALSE)
+step.back <- step(lm(mpg ~ ., data = df), trace = 0, steps = 10000, direction = "backward")
+sum.step.back <- summary(step.back)
+my.confint <- confint(step.back)
+```
+
+#### Excutive Summary  
+Using data from 32 automobile vechicles model years 1973-1974, this study attempts to quantify the affect the transmission type (automatic or manual) has on consumption of fuel, measured in miles per gallon (mpg). While an independent samples t-test did find that the mpg gain for autos with manual transmission is between `r abs(t$conf.int[2])` and `r abs(t$conf.int[1])`, transmission type alone is not the best predictor of mpg.  Using multivariate stepwise regression, it was found that the best predictor of miles per gallon is a combination of car weight, 1/4 mile time, and transmission type. In this model, a car with manual transmission  will experience a gain of `r round(my.confint[4,1],2)` - `r round(my.confint[4,2],2)` mpg over a car with automatic transmission.  
+
+#### Data  
+The data includes 11 measurements for each vehicle, which are: miles per gallon, number of cylinders, displacement (cu. in.), gross horsepower, rear axle ratio, weight (lb/1000), 1/4 mile time, engine shape (V or inline straight), transmission type, number of forward gears, and number of carburetors.
+
+#### Exploratory Data Analysis
+This table summarizes mpg by transmission type. See **Appendix A** for a boxplot of mpg by transmission type.  
+
+```{r, echo = FALSE}
+tbl <- ddply(df, "transmission", summarise, 
+      count = length(mpg),
+      mean = round(mean(mpg),2),
+      sd = round(sd(mpg),2))
+tbl
+```
+
+#### Inference via Independent Samples T-Test  
+```{r, echo=FALSE}
+# Levene's test
+lt <- car::leveneTest(mpg ~ transmission, data = df)
+t <- t.test(mpg ~ transmission, data = df, var.equal = FALSE)
+```
+The average mpg for manual transmissions is `r tbl[2,3] - tbl[1,3]` mpg greater than automatic transmissions. An indepedent samples t-test was run to see these means were statistically different. Prior to running the independent t-test, the assumption of homogeneity of variance was testing using Levene's Test (see **Appendix B**). The p-value for Levene's Test was significant as `r round(lt[1,3],4)` and therefore the independent t-test proceeded assuming unequal variances.  
+
+These data provide convincing evidence that automobiles with manual transmission will have better gas mileage than autos with automatic transmission, t(`r t$parameter`) = `r t$statistic`, p-value = `r t$p.value`.   These data suggest with 95% confidence that the mpg gain for autos with manual transmission will be between  `r abs(t$conf.int[2])` and `r abs(t$conf.int[1])`. However, the question must be asked, is mpg affected solely by transmission type, or do other factors help determine overall mpg of a car?
+
+#### Regression Modeling  
+```{r, echo=FALSE}
+fit <- lm(mpg ~ transmission, data = df)
+```
+**Bivariate Linear Regression**  
+A bivariate linear regression was run with transmission type as the predictor. The full results of this model can be found in **Appendix C**. The adjusted r-squared is `r summary(fit)$adj.r.squared`, meaning that the transmission type accounts for `r round(summary(fit)$adj.r.squared*100,2)`% of the variability in miles per gallon. 
+
+Bivariate analysis predicting mpg from each of the other nine car characteristics are all siginificant at 95% confidence, just as transmission type was. This table shows the p-value and adjusted r-squared for each bivariate linear model of the form *lm(mpg ~ predictor)*, in descending r-squared order.    
+
+```{r, echo=FALSE}
+bivar.results <- data.frame(predictor = "NA",
+                            p.val = 0,
+                            adj.r.sq = 0,
+                            stringsAsFactors = FALSE)
+
+for (i in 2:ncol(mtcars)) {
+  x <- summary(fit <- lm(mpg ~ df[,i], data = df))
+  bivar.results[i-1,] <- c(colnames(df[i]),
+                           format(x$coefficients[2,4], scientific = TRUE),
+                           #round(x$coefficients[2,4],4),
+                           round(x$adj.r.squared,3))
+}
+plyr::arrange(bivar.results, desc(adj.r.sq))
+```
+Making a prediction mpg from any one of these predictors would be misguided. A better solution is to find a parsimonious multivariate model using regressors (predictors) that are statistically significant in predicting miles per gallon. 
+
+**Multivariate Linear Regression**  
+Predicting mpg as a function of all 10 predictors results in a model without any statistically significant predictors at the 95% confidence interval. (see **Appendix D-1**). The problem is, many of the variables are confounding. For example, an engine with more cylinders is going to have a greater displacement and greater horsepower (see **Appendix D-2**). 
+```{r, echo=FALSE}
+step.back <- step(lm(mpg ~ ., data = df), trace = 0, steps = 10000, direction = "backward")
+sum.step.back <- summary(step.back)
+```
+The next approach was to build a model using backwards stepwise regression, where all 10 predictors are introduced to the model, and working backwards, predictors are removed until the model reaches it's maximum predictive power. The results for the stepwise model are in **Appendix D-3**. The result is the parsimonious model in which **mpg is predicted by car weight, 1/4 mile time, and transmission type** with a strong adjusted r-squared of `r sum.step.back$adj.r.squared`. The residual plot (see **Appendix D-4**) shows random scatter of the fitted values against the residual, which is a sign of good fit.  
+
+#### Summary of Findings  
+```{r, echo=FALSE}
+my.confint <- confint(step.back)
+```
+
+From the parsimonious model, leaving car weigth and 1/4 mile time constant, a car with manual transmission will, on average, experience a gain in mpg of `r round(sum.step.back$coefficients[4,1],2)` over a car with automatic transmission, and a range of `r round(my.confint[4,1],2)` - `r round(my.confint[4,2],2)` mpg with 95% confidence.  
+
+#### Appendix A: Exploration  
+
+```{r, echo=FALSE, fig.height= 3, fig.width= 5}
+p <- ggplot(df, aes(transmission, mpg))
+p <- p + geom_boxplot() + xlab("transmission type") + ylab("mpg")
+p <- p + geom_jitter()
+p
+```
+
+#### Appendix B: Independent Samples T-Test 
+The results of the independent samples t-test.  
+```{r, echo=FALSE}
+lt <- car::leveneTest(mpg ~ transmission, data = df)
+t <- t.test(mpg ~ transmission, data = df, var.equal = FALSE)
+lt
+t
+```
+
+#### Appendix C: Bivariate Regression Model  
+**Miles Per Gallon as a Function of Transmission Type**    
+```{r, echo=FALSE}
+fit <- lm(mpg ~ transmission, data = df)
+summary(fit)
+```
+
+#### Appendix D-1: Model using all predictors
+Coefficients and p-values for a model using all predictors.
+```{r, echo=FALSE, fig.height= 2, fig.width = 5}
+fit.all <- lm(mpg ~ ., data = df)
+summary(fit.all)$coefficients
+#par(mfrow = c(1,2))
+#plot(fit.all, which = c(1:2))
+#dev.off()
+```
+#### Appendix D-2: Confounding Variables
+Displacement, horsepower, and number of cylinders are all confounding variables related to each other. Including all of these in a model is redundant.  
+
+```{r, echo=FALSE, fig.height = 3 , fig.width=5}
+p <- ggplot(df, aes(disp, hp))
+p <- p + geom_point(aes(color = as.factor(cyl), size = mpg)) + xlab("displacement") + ylab("horsepower")
+p
+```
+
+#### Appendix D-3: Stepwise Model
+```{r}
+step.back <- step(lm(mpg ~ ., data = df), trace = 0, steps = 10000, direction = "backward")
+summary(step.back)
+```
+```{r, echo= FALSE}
+confint(step.back)
+```
+
+#### Appendix D-4: Parsimonious Model Residual Plots
+```{r, echo=FALSE, fig.height=3, fig.width = 6}
+par(mfrow = c(1,2))
+plot(step.back, which = c(1:2))
+```
+
